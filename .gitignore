@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+*.nii
+*.nii.gz
+*.dat
+*.SDAT
+*.sdat
+*.zip
+tests/data/ismrm_fitting_challenge/repo/
+tests/data/nifti_mrs_standard/
+tests/data/big_gaba/
