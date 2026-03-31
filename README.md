@@ -294,13 +294,21 @@ Brian Ross established the [first comprehensive clinical MRS service in the Unit
 
 [Alexander Lin](https://pnl.bwh.harvard.edu/index.php/alexander-lin-ph-d/), a Caltech graduate (Bioengineering and Biochemistry/Molecular Biophysics), first encountered MRS as an undergraduate in Ross's lab and went on to direct clinical services at HMRI. Lin's trajectory — from bench science to clinical translation — culminated in [BrainSpec](https://getbrainspec.com/), which received [FDA clearance in 2023](https://www.prnewswire.com/news-releases/brainspec-receives-full-fda-clearance-to-begin-using-ai-backed-solution-for-non-invasive-brain-chemistry-measurement-301997375.html) as the first MRS platform with a normative brain chemistry reference database. BrainSpec automates the delivery of MRS results from days to minutes — the clinical realization of Ross's vision from the GE MR Masters Series lecture *"Beyond MRI: MR Spectroscopy for the New Millennium."*
 
+### Multivoxel spectroscopic imaging: Sarah Nelson at UCSF
+
+[Sarah Nelson](https://cancer.ucsf.edu/people/profiles/nelson_sarah.3528) (1954–2019) transformed MRS from a single-voxel curiosity into a spatially resolved imaging modality for clinical oncology. Her [multivoxel MRSI program](https://radiology.ucsf.edu/research/labs/nelson) at UCSF demonstrated that 3D spectroscopic imaging could map choline, NAA, creatine, and lactate across the entire tumor volume and surrounding brain, providing precise chemical information that guided neurosurgical biopsy to the most metabolically active regions and detected infiltrating disease beyond the contrast-enhancing margin. Nelson showed that adding MRSI to conventional MRI improved glioma grading, treatment planning, and early detection of progression — work that produced over 270 publications and continuous NIH funding spanning decades. She was the driving force behind UCSF's installation of one of the world's first 7T MR scanners and the development of the [SIVIC](https://github.com/SIVICLab/sivic) software platform (with Jason Crane) that brought standardized DICOM MRSI workflows into clinical PACS.
+
+### Hyperpolarized ¹³C MRI: Daniel Vigneron at UCSF
+
+[Daniel Vigneron](https://radiology.ucsf.edu/people/daniel-vigneron) and colleagues at UCSF's Surbeck Laboratory pioneered the clinical translation of [hyperpolarized ¹³C MRI](https://pmc.ncbi.nlm.nih.gov/articles/PMC6490043/) — a technique that boosts the ¹³C signal by >10,000-fold through dynamic nuclear polarization (DNP), enabling real-time imaging of metabolic flux that conventional MRS cannot access. By infusing hyperpolarized [1-¹³C]pyruvate and imaging its rapid conversion to lactate (glycolysis) and alanine (transamination), Vigneron's group achieved the first human hyperpolarized ¹³C studies in prostate cancer and brain tumors. This revealed the Warburg effect *in vivo* — aggressive tumors convert pyruvate to lactate faster — providing a metabolic biomarker for treatment response within seconds of injection, long before anatomical changes are visible. The work extends Nelson's spatial metabolic mapping into the time domain: where MRSI gives a static metabolite snapshot, hyperpolarized ¹³C gives a movie of metabolism in action.
+
 ### Whole-brain metabolic mapping: Maudsley and MIDAS
 
 Andrew Maudsley's [MIDAS](https://grantome.com/grant/NIH/R01-EB016064-01A1) system and echo-planar spectroscopic imaging (EPSI) demonstrated that metabolite distributions could be mapped across 118,000+ voxels in a single acquisition, revealing spatial patterns of NAA, creatine, and choline that structural MRI cannot see. Recent advances in [compressed-sensing FID-MRSI](https://pubmed.ncbi.nlm.nih.gov/34595791/) now achieve 5mm isotropic resolution across the whole brain in 20 minutes — approaching the resolution needed for cortical layer-specific metabolite mapping.
 
 ### Neuroenergetics: Rothman, Hyder, and Shulman at Yale
 
-The Yale group used [¹³C-labeled glucose infusion with MRS](https://web.stanford.edu/class/rad226a/Readings/Lecture20-Rothman_2011.pdf) to trace metabolic flux in the living human brain, discovering the stoichiometric relationship between glutamate-glutamine cycling (V_cycle) and neuronal glucose oxidation (CMR_glc) — a foundational result linking neural activity to energy metabolism. Their work showed that ~80% of cortical energy consumption supports glutamatergic signaling, with the remainder sustaining housekeeping functions. This ¹³C-MRS methodology, combined with ¹H-[¹³C] editing to detect ¹³C label incorporation into glutamate and glutamine, opened the door to measuring neurotransmitter cycling rates in vivo.
+The Yale group used [¹³C-labeled glucose infusion with MRS](https://web.stanford.edu/class/rad226a/Readings/Lecture20-Rothman_2011.pdf) to trace metabolic flux in the living human brain, discovering the stoichiometric relationship between glutamate-glutamine cycling (V_cycle) and neuronal glucose oxidation (CMR_glc) — a foundational result linking neural activity to energy metabolism. Their work showed that ~80% of cortical energy consumption supports glutamatergic signaling, with the remainder sustaining housekeeping functions. This ¹³C-MRS methodology, combined with ¹H-[¹³C] editing to detect ¹³C label incorporation into glutamate and glutamine, opened the door to measuring neurotransmitter cycling rates *in vivo*.
 
 ### Clinical spectral editing: from MEGA-PRESS to Big GABA
 
@@ -331,6 +339,9 @@ mrs-jax builds on this foundation with modern tools: JAX for differentiable comp
 - Crane JC, Olson MP, Nelson SJ (2013) SIVIC: Open-source, standards-based software for DICOM MR spectroscopy workflows. *Int J Biomed Imaging* 2013:169526
 - Ross BD, Lin AP. *Beyond MRI: MR Spectroscopy for the New Millennium.* GE MR Masters Series. GE Medical Systems.
 - Oeltzschner G et al. (2020) Osprey: Open-source processing, reconstruction & estimation of MRS data. *JMRI* 52:88–105
+- Nelson SJ et al. (2001) Analysis of volume MRI and MR spectroscopic imaging data for the evaluation of patients with brain tumors. *MRM* 46:228–239
+- Nelson SJ (2003) Multivoxel magnetic resonance spectroscopy of brain tumors. *Mol Cancer Ther* 2:497–507
+- Kurhanewicz J, Vigneron DB et al. (2019) Hyperpolarized ¹³C MRI: State of the art and future directions. *Radiology* 286:52–71
 
 ---
 
