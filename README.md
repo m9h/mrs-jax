@@ -281,15 +281,38 @@ pytest tests/ -v  # 70 tests, ~56 seconds
 
 ## Context
 
-MR Spectroscopy has a rich history spanning decades of methodological innovation:
+MR Spectroscopy has a rich history spanning four decades of innovation — from the first in vivo spectra to FDA-cleared clinical platforms. mrs-jax is built on the shoulders of this work.
 
-**Whole-brain metabolic mapping** — Andrew Maudsley's [MIDAS](https://grantome.com/grant/NIH/R01-EB016064-01A1) system and echo-planar spectroscopic imaging (EPSI) demonstrated that metabolite distributions could be mapped across 118,000+ voxels in a single acquisition, revealing spatial patterns of NAA, creatine, and choline that structural MRI cannot see. Recent advances in compressed-sensing FID-MRSI now achieve 5mm isotropic resolution across the whole brain in 20 minutes.
+### The clinical foundation: Ross and Lin at Huntington/Caltech
 
-**Neuroenergetics via ¹³C-MRS** — The Yale group (Rothman, Hyder, Shulman) used [¹³C-labeled glucose infusion with MRS](https://web.stanford.edu/class/rad226a/Readings/Lecture20-Rothman_2011.pdf) to trace metabolic flux in the living brain, discovering the stoichiometric relationship between glutamate-glutamine cycling and neuronal glucose oxidation — a foundational result linking neural activity to energy metabolism.
+Brian Ross established the [first comprehensive clinical MRS service in the United States](https://link.springer.com/article/10.1602/neurorx.2.2.197) at the Huntington Medical Research Institutes (HMRI) in Pasadena, beginning with his work alongside Sir George Radda at Oxford in 1981. Ross demonstrated that proton MRS could serve as a **"virtual biopsy"** — non-invasively measuring brain metabolites that reveal disease states invisible to structural MRI:
 
-**Clinical spectral editing** — MEGA-PRESS (Mescher et al. 1998) made it possible to resolve GABA from overlapping creatine, enabling routine clinical GABA measurement. The [Big GABA project](https://www.nitrc.org/projects/biggaba/) (Mikkelsen et al. 2017) standardized this across 24 sites worldwide.
+- **Elevated choline + reduced NAA** → tumor proliferation and neuronal loss
+- **Elevated glutamine + reduced myo-inositol** → hepatic encephalopathy
+- **Lactate appearance** → anaerobic metabolism (stroke, mitochondrial disease)
+- **Reduced NAA alone** → neuronal dysfunction (MS, Alzheimer's, TBI)
 
-mrs-jax builds on this foundation with modern tools: JAX for differentiable computation, validated against the field's benchmark datasets, and designed to scale from single-voxel editing to the whole-brain mapping and dynamic ¹³C work that lies ahead.
+[Alexander Lin](https://pnl.bwh.harvard.edu/index.php/alexander-lin-ph-d/), a Caltech graduate (Bioengineering and Biochemistry/Molecular Biophysics), first encountered MRS as an undergraduate in Ross's lab and went on to direct clinical services at HMRI. Lin's trajectory — from bench science to clinical translation — culminated in [BrainSpec](https://getbrainspec.com/), which received [FDA clearance in 2023](https://www.prnewswire.com/news-releases/brainspec-receives-full-fda-clearance-to-begin-using-ai-backed-solution-for-non-invasive-brain-chemistry-measurement-301997375.html) as the first MRS platform with a normative brain chemistry reference database. BrainSpec automates the delivery of MRS results from days to minutes — the clinical realization of Ross's vision from the GE MR Masters Series lecture *"Beyond MRI: MR Spectroscopy for the New Millennium."*
+
+### Whole-brain metabolic mapping: Maudsley and MIDAS
+
+Andrew Maudsley's [MIDAS](https://grantome.com/grant/NIH/R01-EB016064-01A1) system and echo-planar spectroscopic imaging (EPSI) demonstrated that metabolite distributions could be mapped across 118,000+ voxels in a single acquisition, revealing spatial patterns of NAA, creatine, and choline that structural MRI cannot see. Recent advances in [compressed-sensing FID-MRSI](https://pubmed.ncbi.nlm.nih.gov/34595791/) now achieve 5mm isotropic resolution across the whole brain in 20 minutes — approaching the resolution needed for cortical layer-specific metabolite mapping.
+
+### Neuroenergetics: Rothman, Hyder, and Shulman at Yale
+
+The Yale group used [¹³C-labeled glucose infusion with MRS](https://web.stanford.edu/class/rad226a/Readings/Lecture20-Rothman_2011.pdf) to trace metabolic flux in the living human brain, discovering the stoichiometric relationship between glutamate-glutamine cycling (V_cycle) and neuronal glucose oxidation (CMR_glc) — a foundational result linking neural activity to energy metabolism. Their work showed that ~80% of cortical energy consumption supports glutamatergic signaling, with the remainder sustaining housekeeping functions. This ¹³C-MRS methodology, combined with ¹H-[¹³C] editing to detect ¹³C label incorporation into glutamate and glutamine, opened the door to measuring neurotransmitter cycling rates in vivo.
+
+### Clinical spectral editing: from MEGA-PRESS to Big GABA
+
+MEGA-PRESS (Mescher et al. 1998) made it possible to resolve GABA — the brain's primary inhibitory neurotransmitter — from the overlapping creatine peak at 3.0 ppm, enabling routine clinical GABA measurement. The [Big GABA project](https://www.nitrc.org/projects/biggaba/) (Mikkelsen et al. 2017) standardized MEGA-PRESS across 24 sites worldwide on all three major scanner vendors, establishing reproducibility benchmarks that any new tool must meet.
+
+### Open-source ecosystem: SIVIC, FSL-MRS, Osprey
+
+The field's maturation is reflected in its software: [SIVIC](https://github.com/SIVICLab/sivic) (Crane, Nelson — UCSF) is the reference implementation for DICOM-standard MRSI clinical workflows, processing ~400 brain MRSI reports per year directly into PACS with standardized choline/NAA indices for tumor grading; [FSL-MRS](https://onlinelibrary.wiley.com/doi/10.1002/mrm.28630) (Clarke — Oxford) provided end-to-end SVS analysis with Python and density-matrix basis simulation; [Osprey](https://github.com/schorschinho/osprey) (Oeltzschner — Johns Hopkins) integrated preprocessing, fitting, and quantification for edited MRS with an emphasis on MEGA-PRESS/HERMES. mrs-jax complements these tools by adding JAX-based differentiable computation and GPU batch processing — learning from SIVIC's clinical workflow design, FSL-MRS's simulation engine, and Osprey's editing pipeline.
+
+### Where mrs-jax fits
+
+mrs-jax builds on this foundation with modern tools: JAX for differentiable computation, validated against the field's benchmark datasets (Big GABA, ISMRM Fitting Challenge), and designed to scale from single-voxel editing to the whole-brain mapping and dynamic ¹³C work that lies ahead. The immediate goal is robust, reproducible GABA and GSH quantification; the long-term vision follows Ross's original insight — making the virtual biopsy routine.
 
 ---
 
@@ -303,6 +326,11 @@ mrs-jax builds on this foundation with modern tools: JAX for differentiable comp
 - Maudsley AA et al. (2009) Mapping of brain metabolite distributions by volumetric proton MR spectroscopic imaging. *MRM* 61:548–559
 - Rothman DL et al. (2011) ¹³C MRS studies of neuroenergetics and neurotransmitter cycling in humans. *NMR Biomed* 24:943–957
 - Marjańska M et al. (2022) Results of a fitting challenge for MR spectroscopy. *MRM* 87:2198–2211
+- Ross BD, Bluml S (2001) Magnetic resonance spectroscopy of the human brain. *Anat Rec* 265:54–84
+- Ross BD, Lin AP (2005) Efficacy of proton MRS in neurological diagnosis and neurotherapeutic decision making. *Neurotherapeutics* 2:197–214
+- Crane JC, Olson MP, Nelson SJ (2013) SIVIC: Open-source, standards-based software for DICOM MR spectroscopy workflows. *Int J Biomed Imaging* 2013:169526
+- Ross BD, Lin AP. *Beyond MRI: MR Spectroscopy for the New Millennium.* GE MR Masters Series. GE Medical Systems.
+- Oeltzschner G et al. (2020) Osprey: Open-source processing, reconstruction & estimation of MRS data. *JMRI* 52:88–105
 
 ---
 
