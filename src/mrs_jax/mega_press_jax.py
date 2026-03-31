@@ -90,6 +90,76 @@ def reject_outliers(
     return jnp.abs(z_scores) > threshold
 
 
+def spectral_registration_jax(
+    fid: jnp.ndarray,
+    reference: jnp.ndarray,
+    dwell_time: float,
+    centre_freq: float = 123.0e6,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """JAX-compatible spectral registration via FFT cross-correlation.
+
+    Estimates frequency and phase shift of fid relative to reference
+    using cross-spectral analysis. Fully jit/vmap/grad compatible.
+
+    Parameters
+    ----------
+    fid : jnp.ndarray, shape (n_spec,)
+    reference : jnp.ndarray, shape (n_spec,)
+    dwell_time : float
+    centre_freq : float
+
+    Returns
+    -------
+    freq_shift : jnp.ndarray, scalar
+        Frequency correction in Hz.
+    phase_shift : jnp.ndarray, scalar
+        Phase correction in radians.
+    """
+    n = fid.shape[0]
+    t = jnp.arange(n) * dwell_time
+
+    # Vectorized grid search over frequency shifts (±20 Hz, 0.2 Hz steps)
+    freq_grid = jnp.linspace(-20.0, 20.0, 201)
+
+    # For each candidate freq, apply shift and compute correlation with reference
+    # Phase ramp: exp(2j*pi*df*t) for each df
+    phase_ramps = jnp.exp(2j * jnp.pi * freq_grid[:, None] * t[None, :])  # (201, n)
+
+    # Apply each shift to fid
+    shifted_fids = fid[None, :] * phase_ramps  # (201, n)
+
+    # FFT both
+    spec_ref = jnp.fft.fftshift(jnp.fft.fft(reference))
+    spec_shifted = jnp.fft.fftshift(jnp.fft.fft(shifted_fids, axis=1), axes=1)  # (201, n)
+
+    # Cross-correlation: sum(ref* . shifted) for each candidate
+    cross = jnp.sum(spec_ref.conj()[None, :] * spec_shifted, axis=1)  # (201,)
+
+    # Best frequency: maximize real part of cross-correlation (= minimize phase mismatch)
+    best_idx = jnp.argmax(jnp.real(cross))
+    freq_shift = freq_grid[best_idx]
+
+    # Optimal phase at best frequency
+    phase_shift = -jnp.angle(cross[best_idx])
+
+    return freq_shift, phase_shift
+
+
+def _align_single_transient(carry, fid_pair):
+    """Align a single ON/OFF pair. For use with jax.lax.scan."""
+    ref, dwell_time, centre_freq = carry
+    fid_off, fid_on = fid_pair
+
+    df, dp = spectral_registration_jax(fid_off, ref, dwell_time, centre_freq)
+    t = jnp.arange(fid_off.shape[0]) * dwell_time
+    correction = jnp.exp(2j * jnp.pi * df * t + 1j * dp)
+
+    aligned_off = fid_off * correction
+    aligned_on = fid_on * correction
+
+    return carry, (aligned_on, aligned_off, df, dp)
+
+
 def process_mega_press(
     data: jnp.ndarray,
     dwell_time: float,
@@ -140,9 +210,25 @@ def process_mega_press(
     edit_on = combined[:, 0, :]   # (n_spec, n_dyn)
     edit_off = combined[:, 1, :]  # (n_spec, n_dyn)
 
-    # Step 2: Frequency/phase alignment (not implemented for JAX jit compat)
-    freq_shifts = jnp.zeros(2 * n_dyn)
-    phase_shifts = jnp.zeros(2 * n_dyn)
+    # Step 2: Frequency/phase alignment
+    if align:
+        ref = edit_off.mean(axis=1)  # Reference from mean of edit-OFF
+        carry = (ref, dwell_time, centre_freq)
+
+        # Stack (OFF, ON) pairs for scan: shape (n_dyn, n_spec) each
+        fid_pairs = (edit_off.T, edit_on.T)  # Each (n_dyn, n_spec)
+
+        _, (aligned_on_T, aligned_off_T, freq_arr, phase_arr) = jax.lax.scan(
+            _align_single_transient, carry, fid_pairs
+        )
+
+        edit_on = aligned_on_T.T   # Back to (n_spec, n_dyn)
+        edit_off = aligned_off_T.T
+        freq_shifts = jnp.concatenate([freq_arr, freq_arr])
+        phase_shifts = jnp.concatenate([phase_arr, phase_arr])
+    else:
+        freq_shifts = jnp.zeros(2 * n_dyn)
+        phase_shifts = jnp.zeros(2 * n_dyn)
 
     # Step 3: Outlier rejection (not implemented for JAX jit compat)
     rejected = jnp.zeros(2 * n_dyn, dtype=bool)
