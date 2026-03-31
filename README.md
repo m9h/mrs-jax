@@ -275,6 +275,8 @@ pytest tests/ -v  # 70 tests, ~56 seconds
 | 🔜 | Whole-brain MRSI (EPSI/FID-MRSI) |
 | 🔜 | Dynamic fMRS time-course analysis |
 | 🔜 | ¹³C-MRS metabolic flux modeling |
+| 🔜 | Synthetic MRS data generation (JAX-based forward model) |
+| 🔜 | Hyperpolarized ¹³C pyruvate kinetic modeling |
 | 🔜 | PyGAMMA integration for J-coupling simulation |
 
 ---
@@ -301,6 +303,14 @@ Brian Ross established the [first comprehensive clinical MRS service in the Unit
 ### Hyperpolarized ¹³C MRI: Daniel Vigneron at UCSF
 
 [Daniel Vigneron](https://radiology.ucsf.edu/people/daniel-vigneron) and colleagues at UCSF's Surbeck Laboratory pioneered the clinical translation of [hyperpolarized ¹³C MRI](https://pmc.ncbi.nlm.nih.gov/articles/PMC6490043/) — a technique that boosts the ¹³C signal by >10,000-fold through dynamic nuclear polarization (DNP), enabling real-time imaging of metabolic flux that conventional MRS cannot access. By infusing hyperpolarized [1-¹³C]pyruvate and imaging its rapid conversion to lactate (glycolysis) and alanine (transamination), Vigneron's group achieved the first human hyperpolarized ¹³C studies in prostate cancer and brain tumors. This revealed the Warburg effect *in vivo* — aggressive tumors convert pyruvate to lactate faster — providing a metabolic biomarker for treatment response within seconds of injection, long before anatomical changes are visible. The work extends Nelson's spatial metabolic mapping into the time domain: where MRSI gives a static metabolite snapshot, hyperpolarized ¹³C gives a movie of metabolism in action.
+
+### The Oxford MRS lineage: from Radda's ³¹P to cardiac hyperpolarized ¹³C
+
+The story of in vivo MR spectroscopy begins at Oxford. [Sir George Radda](https://www.bioch.ox.ac.uk/article/sir-george-radda-cbe-fmedsci-frs) (1936–2024) published the first paper using phosphorus-31 NMR to study tissue metabolites, creating the world's first clinical NMR unit and establishing the principle that MR could measure biochemistry — not just anatomy — in living tissue. His ³¹P studies of ATP dynamics in muscle and heart laid the foundation for everything that followed: Brian Ross trained with Radda at Oxford before bringing clinical MRS to the United States.
+
+The Oxford MRS tradition continued through [Damian Tyler](https://www.cardiov.ox.ac.uk/team/damian-tyler) and colleagues, who translated [hyperpolarized ¹³C MRI to the human heart](https://www.ahajournals.org/doi/10.1161/CIRCRESAHA.119.316260). Building on Jan Henrik Ardenkjær-Larsen's 2003 DNP breakthrough (>10,000× signal enhancement), the Oxford cardiac group demonstrated *in vivo* assessment of pyruvate dehydrogenase flux — measuring how the heart switches between fuel sources (glucose vs fatty acids) in health, diabetes, and ischemia. This cardiac application of hyperpolarized ¹³C complements Vigneron's oncology work at UCSF: where UCSF images the Warburg effect in tumors, Oxford images metabolic flexibility in the heart.
+
+The Oxford ecosystem also produced [FSL-MRS](https://git.fmrib.ox.ac.uk/fsl/fsl_mrs) (Will Clarke, FMRIB) — the Python-based SVS analysis package whose density-matrix simulator and NIfTI-MRS format mrs-jax builds upon — and [MMORF](https://fsl.fmrib.ox.ac.uk/fsl/docs/registration/mmorf.html) (Arthofer, Mayston, Jenkinson), the multimodal registration framework used in our WAND processing pipeline.
 
 ### Whole-brain metabolic mapping: Maudsley and MIDAS
 
@@ -342,6 +352,9 @@ mrs-jax builds on this foundation with modern tools: JAX for differentiable comp
 - Nelson SJ et al. (2001) Analysis of volume MRI and MR spectroscopic imaging data for the evaluation of patients with brain tumors. *MRM* 46:228–239
 - Nelson SJ (2003) Multivoxel magnetic resonance spectroscopy of brain tumors. *Mol Cancer Ther* 2:497–507
 - Kurhanewicz J, Vigneron DB et al. (2019) Hyperpolarized ¹³C MRI: State of the art and future directions. *Radiology* 286:52–71
+- Radda GK (1986) The use of NMR spectroscopy for the understanding of disease. *Science* 233:640–645
+- Rider OJ, Tyler DJ et al. (2020) Noninvasive in vivo assessment of cardiac metabolism in the healthy and diabetic human heart using hyperpolarized ¹³C MRI. *Circ Res* 126:725–736
+- Ardenkjær-Larsen JH et al. (2003) Increase in signal-to-noise ratio of >10,000 times in liquid-state NMR. *PNAS* 100:10158–10163
 
 ---
 
