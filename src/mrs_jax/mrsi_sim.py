@@ -81,6 +81,93 @@ class TissueModel:
         return len(self.metabolite_maps)
 
 
+# Literature metabolite concentrations (mM) per tissue type
+# Sources: Govindaraju et al. NMR Biomed 2000, Maudsley et al. MRM 2009
+# FAST labels: 0=background, 1=CSF, 2=GM, 3=WM
+METABOLITE_CONCENTRATIONS = {
+    #             BG    CSF    GM     WM
+    'NAA':      [0.0,  0.0,  12.5,  10.0],
+    'NAAG':     [0.0,  0.0,   2.0,   1.5],
+    'Cr':       [0.0,  0.0,   8.0,   6.0],
+    'PCr':      [0.0,  0.0,   4.5,   4.0],
+    'Cho':      [0.0,  0.0,   2.5,   3.0],
+    'mIns':     [0.0,  0.0,   7.0,   4.0],
+    'Glu':      [0.0,  0.0,  11.0,   6.0],
+    'Gln':      [0.0,  0.0,   4.0,   3.0],
+    'GABA':     [0.0,  0.0,   1.5,   1.0],
+    'GSH':      [0.0,  0.0,   2.0,   1.5],
+    'Tau':      [0.0,  0.0,   1.5,   1.0],
+    'Lac':      [0.0,  0.0,   0.5,   0.3],
+    'Asp':      [0.0,  0.0,   2.0,   1.5],
+}
+
+# T1 and T2* per tissue at 3T (seconds)
+TISSUE_T1 = {0: 0.0, 1: 4.16, 2: 1.33, 3: 0.83}
+TISSUE_T2STAR = {0: 0.0, 1: 1.65, 2: 0.040, 3: 0.045}
+
+
+def load_wand_phantom(
+    segmentation_path: str,
+    resolution_mm: float = None,
+) -> TissueModel:
+    """Load a realistic brain phantom from WAND FAST segmentation.
+
+    Creates a TissueModel with per-voxel metabolite concentrations
+    based on tissue type (GM/WM/CSF) and literature values.
+
+    Parameters
+    ----------
+    segmentation_path : str
+        Path to FAST tissue segmentation NIfTI (labels: 0=bg, 1=CSF, 2=GM, 3=WM).
+    resolution_mm : float, optional
+        If given, downsample the phantom to this isotropic resolution
+        (in mm) for faster simulation.
+
+    Returns
+    -------
+    TissueModel
+    """
+    import nibabel as nib
+    from scipy.ndimage import zoom
+
+    img = nib.load(segmentation_path)
+    seg = img.get_fdata().astype(int)
+    voxel_size = img.header.get_zooms()[:3]
+
+    # Downsample if requested
+    if resolution_mm is not None:
+        scale = tuple(v / resolution_mm for v in voxel_size)
+        seg = zoom(seg, scale, order=0)  # Nearest-neighbor for labels
+        voxel_size = (resolution_mm, resolution_mm, resolution_mm)
+
+    # Build metabolite concentration maps
+    metab_maps = {}
+    for metab, concs in METABOLITE_CONCENTRATIONS.items():
+        m = np.zeros(seg.shape, dtype=np.float32)
+        for label, c in enumerate(concs):
+            m[seg == label] = c
+        metab_maps[metab] = m
+
+    # Build T1 and T2* maps
+    t1_map = np.zeros(seg.shape, dtype=np.float32)
+    t2star_map = np.zeros(seg.shape, dtype=np.float32)
+    for label in TISSUE_T1:
+        t1_map[seg == label] = TISSUE_T1[label]
+        t2star_map[seg == label] = TISSUE_T2STAR[label]
+
+    # Set minimum T2* to avoid division by zero
+    t2star_map = np.maximum(t2star_map, 1e-6)
+
+    return TissueModel(
+        tissue_map=seg,
+        metabolite_maps=metab_maps,
+        t1_map=t1_map,
+        t2star_map=t2star_map,
+        b0_shift_map=np.zeros(seg.shape, dtype=np.float32),
+        voxel_size=voxel_size,
+    )
+
+
 def make_lorentzian_basis(
     metabolite_shifts: dict[str, float],
     n_points: int = 1024,
