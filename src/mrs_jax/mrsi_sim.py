@@ -320,3 +320,270 @@ def simulate_mrsi_from_arrays(
 
     kspace = jnp.fft.fftn(signal, axes=(0, 1, 2))
     return kspace
+
+
+# =========================================================================
+# EPSI trajectory and simulation
+# =========================================================================
+
+@dataclass
+class EPSITrajectory:
+    """EPSI readout trajectory.
+
+    EPSI uses an oscillating read gradient to encode one spatial dimension
+    and the spectral dimension simultaneously. Each oscillation lobe
+    traverses k-space in the read direction; successive lobes alternate
+    direction (bipolar). The spectral dimension is encoded by the time
+    between corresponding k-space positions across lobes.
+
+    Attributes
+    ----------
+    k_readout : ndarray, shape (n_spatial * n_spectral,)
+        k-space position (1/mm) at each sample point along the readout.
+    n_spatial : int
+        Number of spatial encoding points per lobe.
+    n_spectral : int
+        Number of spectral points (= number of gradient lobes).
+    dwell_time : float
+        Spectral dwell time in seconds (time between lobes).
+    fov_mm : float
+        Field of view in mm.
+    """
+    k_readout: np.ndarray
+    n_spatial: int
+    n_spectral: int
+    dwell_time: float
+    fov_mm: float
+
+
+def generate_epsi_trajectory(
+    n_spatial: int = 32,
+    n_spectral: int = 256,
+    dwell_time: float = 2.5e-4,
+    fov_mm: float = 240.0,
+) -> EPSITrajectory:
+    """Generate an EPSI oscillating readout trajectory.
+
+    The trajectory consists of n_spectral bipolar gradient lobes,
+    each traversing n_spatial points in k-space. Odd lobes go left→right,
+    even lobes go right→left.
+
+    Parameters
+    ----------
+    n_spatial : int
+        Spatial resolution (points per gradient lobe).
+    n_spectral : int
+        Number of spectral points (gradient lobes).
+    dwell_time : float
+        Time between corresponding k-space positions across lobes (seconds).
+    fov_mm : float
+        Field of view in mm.
+
+    Returns
+    -------
+    EPSITrajectory
+    """
+    # k-space extent: -k_max to +k_max
+    k_max = n_spatial / (2.0 * fov_mm)  # 1/mm
+
+    # One lobe: linear ramp from -k_max to +k_max (or reversed)
+    k_lobe_forward = np.linspace(-k_max, k_max, n_spatial)
+    k_lobe_reverse = np.linspace(k_max, -k_max, n_spatial)
+
+    # Stack lobes: alternating forward/reverse
+    k_all = []
+    for i in range(n_spectral):
+        if i % 2 == 0:
+            k_all.append(k_lobe_forward)
+        else:
+            k_all.append(k_lobe_reverse)
+
+    k_readout = np.concatenate(k_all)
+
+    return EPSITrajectory(
+        k_readout=k_readout,
+        n_spatial=n_spatial,
+        n_spectral=n_spectral,
+        dwell_time=dwell_time,
+        fov_mm=fov_mm,
+    )
+
+
+def simulate_epsi(
+    model: TissueModel,
+    basis: dict,
+    traj: EPSITrajectory,
+) -> np.ndarray:
+    """Simulate EPSI signal from a tissue model along the readout direction.
+
+    Computes signal for a 1D readout (x-direction) at each time point,
+    using the EPSI trajectory to determine k-space position.
+
+    Parameters
+    ----------
+    model : TissueModel
+        Tissue model (uses first spatial dimension as readout).
+    basis : dict[str, ndarray]
+        Metabolite basis spectra.
+    traj : EPSITrajectory
+
+    Returns
+    -------
+    signal : ndarray, shape (n_spatial * n_spectral,)
+        Raw EPSI signal along the oscillating readout.
+    """
+    nx = model.shape[0]
+    n_total = traj.n_spatial * traj.n_spectral
+
+    # Spatial positions along readout (x direction), in mm
+    voxel_size_x = traj.fov_mm / nx if nx > 0 else 1.0
+    x_positions = (np.arange(nx) - nx / 2) * voxel_size_x  # mm, centered
+
+    # Time array: each sample has a time = lobe_index * dwell_time + intra-lobe offset
+    # For simplicity, spectral time = lobe index * dwell_time
+    lobe_indices = np.repeat(np.arange(traj.n_spectral), traj.n_spatial)
+    t_spectral = lobe_indices * traj.dwell_time
+
+    # Build voxel signals: for each x position, compute FID at each spectral time
+    # Average over y, z dimensions (projection onto readout)
+    signal = np.zeros(n_total, dtype=np.complex64)
+
+    for ix in range(nx):
+        # Sum metabolite contributions for this x position
+        voxel_fid = np.zeros(n_total, dtype=np.complex64)
+
+        for name, basis_fid in basis.items():
+            if name not in model.metabolite_maps:
+                continue
+            # Concentration averaged over y, z at this x
+            conc = model.metabolite_maps[name][ix, :, :].mean()
+            if conc == 0:
+                continue
+
+            # Interpolate basis FID at spectral times
+            n_basis = len(basis_fid)
+            basis_times = np.arange(n_basis) * traj.dwell_time
+            basis_real = np.interp(t_spectral, basis_times, np.real(basis_fid), right=0)
+            basis_imag = np.interp(t_spectral, basis_times, np.imag(basis_fid), right=0)
+            basis_interp = basis_real + 1j * basis_imag
+
+            voxel_fid += conc * basis_interp
+
+        # T2* decay
+        t2star = model.t2star_map[ix, :, :].mean()
+        t2star = max(t2star, 1e-6)
+        decay = np.exp(-t_spectral / t2star)
+
+        # B0 shift
+        b0 = model.b0_shift_map[ix, :, :].mean()
+        phase_mod = np.exp(2j * np.pi * b0 * t_spectral)
+
+        # Spatial encoding: exp(-i * 2π * k * x)
+        spatial_phase = np.exp(-2j * np.pi * traj.k_readout * x_positions[ix])
+
+        signal += voxel_fid * decay * phase_mod * spatial_phase
+
+    return signal
+
+
+def reconstruct_epsi(
+    signal: np.ndarray,
+    traj: EPSITrajectory,
+) -> np.ndarray:
+    """Reconstruct EPSI signal to spatial-spectral image.
+
+    Separates the interleaved spatial-spectral data, reverses even lobes,
+    and applies FFT along the spatial dimension.
+
+    Parameters
+    ----------
+    signal : ndarray, shape (n_spatial * n_spectral,)
+        Raw EPSI signal.
+    traj : EPSITrajectory
+
+    Returns
+    -------
+    image : ndarray, shape (n_spatial, n_spectral)
+        Reconstructed spatial-spectral image.
+    """
+    ns = traj.n_spatial
+    nf = traj.n_spectral
+
+    # Reshape to (n_spectral, n_spatial) — one row per lobe
+    data = signal.reshape(nf, ns)
+
+    # Reverse even-numbered lobes (bipolar correction)
+    data[1::2, :] = data[1::2, ::-1]
+
+    # Now each column is a spatial position, each row is a spectral time point
+    # Transpose to (n_spatial, n_spectral)
+    data = data.T
+
+    # FFT along spatial dimension → image space
+    # (Already in k-space along spatial dim from the readout encoding)
+    image = np.fft.ifft(data, axis=0)
+
+    return image
+
+
+def simulate_epsi_from_arrays(
+    concentrations,
+    basis_fid,
+    t2star,
+    b0,
+    traj: EPSITrajectory,
+):
+    """Differentiable EPSI simulation from JAX arrays (1D readout).
+
+    Parameters
+    ----------
+    concentrations : jnp.ndarray, shape (nx,)
+        Concentration per voxel along readout.
+    basis_fid : jnp.ndarray, shape (n_basis,)
+        Basis FID for one metabolite.
+    t2star : jnp.ndarray, shape (nx,)
+        T2* per voxel.
+    b0 : jnp.ndarray, shape (nx,)
+        B0 shift per voxel (Hz).
+    traj : EPSITrajectory
+
+    Returns
+    -------
+    signal : jnp.ndarray, shape (n_spatial * n_spectral,)
+    """
+    import jax.numpy as jnp
+
+    nx = concentrations.shape[0]
+    ns = traj.n_spatial
+    nf = traj.n_spectral
+    n_total = ns * nf
+
+    voxel_size_x = traj.fov_mm / nx
+    x_pos = (jnp.arange(nx) - nx / 2) * voxel_size_x
+
+    lobe_indices = jnp.repeat(jnp.arange(nf), ns)
+    t_spectral = lobe_indices * traj.dwell_time
+    k = jnp.array(traj.k_readout)
+
+    # Interpolate basis at spectral times
+    n_basis = basis_fid.shape[0]
+    basis_times = jnp.arange(n_basis) * traj.dwell_time
+    # Simple: use the lobe index to sample the basis
+    lobe_idx_clipped = jnp.clip(lobe_indices, 0, n_basis - 1)
+    basis_samples = basis_fid[lobe_idx_clipped]
+
+    # Vectorized over voxels
+    # (nx, 1) * (1, n_total) broadcasting
+    conc = concentrations[:, None]
+    t2s = t2star[:, None]
+    b0v = b0[:, None]
+    xp = x_pos[:, None]
+
+    decay = jnp.exp(-t_spectral[None, :] / (t2s + 1e-10))
+    phase_b0 = jnp.exp(2j * jnp.pi * b0v * t_spectral[None, :])
+    spatial = jnp.exp(-2j * jnp.pi * k[None, :] * xp)
+
+    voxel_signals = conc * basis_samples[None, :] * decay * phase_b0 * spatial
+    signal = jnp.sum(voxel_signals, axis=0)
+
+    return signal
