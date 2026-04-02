@@ -13,3 +13,4 @@ build/
 tests/data/ismrm_fitting_challenge/repo/
 tests/data/nifti_mrs_standard/
 tests/data/big_gaba/
+tests/data/hp_toolbox/
