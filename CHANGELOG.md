@@ -22,6 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - NumPy/JAX EPSI basis interpolation consistently zero-fills beyond support.
 - `simulate_mrsi_jax` now computes natively in JAX, including multiple metabolites,
   instead of wrapping a NumPy result.
+- MEGA-PRESS equivalence tests now compare explicit single and double precision,
+  with precision-specific tolerances across CPU backends.
 
 ## [0.1.0] - 2025
 
