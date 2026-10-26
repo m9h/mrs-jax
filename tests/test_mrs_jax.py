@@ -8,6 +8,10 @@ import pytest
 
 jax = pytest.importorskip("jax")
 jnp = pytest.importorskip("jax.numpy")
+try:
+    from jax import enable_x64
+except ImportError:  # Older JAX versions exposed this context in experimental.
+    from jax.experimental import enable_x64
 
 from mrs_jax.mega_press import (
     coil_combine_svd as np_coil_combine_svd,
@@ -99,31 +103,31 @@ class TestJaxApplyCorrection:
 
 
 class TestJaxProcessMega:
-    def test_jax_process_mega_matches_numpy(self):
-        """Full pipeline JAX vs NumPy match on synthetic data."""
+    @pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
+    def test_jax_process_mega_matches_numpy(self, dtype):
+        """Compare equal precision, including a tight double-precision check."""
         data_np, truth = _make_mega_data(noise_level=0.001)
+        data_np = data_np.astype(dtype)
         dwell = truth['dwell']
         cf = truth['cf']
 
         result_np = np_process_mega_press(
             data_np, dwell, cf, align=False, reject=False,
         )
-        result_jax = jax_process_mega_press(
-            jnp.array(data_np), dwell, cf, align=False, reject=False,
-        )
-
-        np.testing.assert_allclose(
-            np.array(result_jax.diff), result_np.diff, atol=1e-5,
-            err_msg="JAX process diff does not match NumPy",
-        )
-        np.testing.assert_allclose(
-            np.array(result_jax.edit_on), result_np.edit_on, atol=1e-5,
-            err_msg="JAX process edit_on does not match NumPy",
-        )
-        np.testing.assert_allclose(
-            np.array(result_jax.edit_off), result_np.edit_off, atol=1e-5,
-            err_msg="JAX process edit_off does not match NumPy",
-        )
+        with enable_x64(dtype == np.complex128):
+            result_jax = jax_process_mega_press(
+                jnp.array(data_np), dwell, cf, align=False, reject=False,
+            )
+            assert result_jax.edit_on.dtype == dtype
+            # SVD, coil contraction and transient averaging accumulate rounding
+            # differently across CPU backends. Budget ~10 float32 eps relative;
+            # retain a much tighter equivalence check at double precision.
+            rtol, atol = (1.2e-6, 1e-5) if dtype == np.complex64 else (1e-10, 1e-10)
+            for name in ("diff", "edit_on", "edit_off"):
+                np.testing.assert_allclose(
+                    np.array(getattr(result_jax, name)), getattr(result_np, name),
+                    rtol=rtol, atol=atol, err_msg=f"JAX process {name} differs at {dtype}",
+                )
 
 
 class TestJaxVmap:

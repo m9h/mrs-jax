@@ -12,6 +12,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   mrs_jax.current_encoding
    mrs_jax.hermes
    mrs_jax.io
    mrs_jax.io_lcmodel
