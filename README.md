@@ -17,7 +17,7 @@
 
 ## Overview
 
-**mrs-jax** is a complete, GPU-accelerated pipeline for processing edited Magnetic Resonance Spectroscopy data. It covers the full journey from raw scanner data to absolute metabolite concentrations — with JAX providing automatic differentiation, batch parallelism, and JIT compilation.
+**mrs-jax** provides edited Magnetic Resonance Spectroscopy processing and MRSI/EPSI simulation prototypes. Selected kernels support JAX differentiation, batching and JIT compilation; the high-level quantification pipeline also uses NumPy/SciPy.
 
 MRS is the only non-invasive technique that can measure neurochemical concentrations *in vivo* in the human brain. The metabolites it detects — GABA (the primary inhibitory neurotransmitter), glutamate (excitatory), NAA (neuronal integrity), creatine (energy metabolism), myo-inositol (glial marker), glutathione (antioxidant) — are the molecular substrates of brain function that structural and functional MRI cannot access.
 
@@ -30,7 +30,7 @@ MRS spans a remarkable range of scales and applications:
 | **Single voxel** | PRESS, STEAM, sLASER | Regional metabolite concentrations in a ~8 cm³ voxel | ✅ Full pipeline |
 | **Spectral editing** | MEGA-PRESS | GABA, GSH — metabolites hidden under larger peaks | ✅ Full pipeline |
 | **Multi-editing** | HERMES, HERCULES | Simultaneous GABA + GSH + other targets via Hadamard encoding | ✅ Hadamard reconstruction |
-| **Whole-brain mapping** | EPSI / FID-MRSI | Metabolite maps at ~1 mL resolution across the entire brain (MIDAS, Maudsley) | 🔜 Planned |
+| **Whole-brain mapping** | EPSI / FID-MRSI | Spatial metabolite mapping | 🧪 MRSI forward model and 1D EPSI prototype; full acquisition pipeline pending |
 | **Dynamic MRS** | fMRS, ¹³C-MRS | Time-resolved metabolic changes during tasks or after ¹³C-glucose infusion | 🔜 Planned |
 | **Hyperpolarized** | ¹³C DNP | >10,000× signal enhancement for real-time metabolic flux imaging | 🔜 Planned |
 
@@ -59,9 +59,13 @@ Raw TWIX → Coil combine → Align → Reject outliers → Edit subtract → Ph
 
 ### ⚡ JAX backend
 
-- `jax.jit` — compile the full pipeline for fast repeated execution
-- `jax.vmap` — process a batch of subjects in parallel on GPU
-- `jax.grad` — differentiate through the correction and fitting pipeline for gradient-based optimization
+- `jax.jit`, `jax.vmap`, `jax.grad` — supported by the JAX processing kernels and array-based simulation paths
+- Native JAX MRSI simulation with multiple metabolites and externally supplied phase histories
+- [Current-induced phase and EPSI timing](docs/current-encoding.md): SI units, explicit sign convention, delayed current waveforms and actual ADC timestamps
+
+### 🧲 Spectroscopy simulation
+
+Metabolic tissue maps (including `mIns`), phase-encoded MRSI, and a 1D EPSI surrogate are implemented. The generated EPSI grid and inverse FFT now agree with independent complex spatial references; reconstruction preserves raw input. The default basis contains one Lorentzian resonance per metabolite. Quantitative myo-inositol recovery requires a realistic sequence-specific basis and independent validation.
 
 ### 🔧 Preprocessing
 
@@ -267,15 +271,15 @@ pytest tests/ -v  # 70 tests, ~56 seconds
 | ✅ | Siemens TWIX reader |
 | ✅ | QC HTML reports |
 | ✅ | Preprocessing (apodization, ECC, freq ref) |
-| 🔜 | Philips SDAT/SPAR reader |
+| ✅ | Philips SDAT/SPAR reader |
 | 🔜 | GE P-file reader |
 | 🔜 | MEGA-PRESS basis simulation |
-| 🔜 | Spectral registration in JAX |
-| 🔜 | LCModel .RAW/.BASIS I/O |
-| 🔜 | Whole-brain MRSI (EPSI/FID-MRSI) |
+| ✅ | Spectral registration in JAX |
+| ✅ | LCModel .RAW/.BASIS I/O |
+| 🧪 | MRSI forward model and 1D EPSI simulation/reconstruction; full whole-brain workflow pending |
 | 🔜 | Dynamic fMRS time-course analysis |
 | 🔜 | ¹³C-MRS metabolic flux modeling |
-| 🔜 | Synthetic MRS data generation (JAX-based forward model) |
+| 🧪 | Synthetic MRSI/EPSI data generation with JAX and current-induced phase |
 | 🔜 | Hyperpolarized ¹³C pyruvate kinetic modeling |
 | 🔜 | PyGAMMA integration for J-coupling simulation |
 

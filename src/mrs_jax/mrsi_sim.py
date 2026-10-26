@@ -35,10 +35,24 @@ References:
     brain motion. MRM 56:439-448.
 """
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+
+
+def _additional_phase(phase_rad, shape, xp):
+    """Broadcast a supplied real phase history without converting JAX tracers."""
+    if phase_rad is None:
+        return 1.0
+    phase = xp.asarray(phase_rad)
+    if xp.iscomplexobj(phase) or np.broadcast_shapes(phase.shape, shape) != shape:
+        raise ValueError("phase_rad must be real and broadcast to the voxel/time signal")
+    if xp is np and not np.all(np.isfinite(phase)):
+        raise ValueError("phase_rad must be finite")
+    return xp.exp(1j * phase)
 
 
 @dataclass
@@ -209,6 +223,8 @@ def simulate_mrsi(
     basis: dict[str, np.ndarray],
     n_spectral: int = 1024,
     dwell_time: float = 2.5e-4,
+    *,
+    phase_rad: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Simulate phase-encoded MRSI k-space data (NumPy).
 
@@ -226,6 +242,10 @@ def simulate_mrsi(
         Number of spectral (time) points.
     dwell_time : float
         Dwell time in seconds.
+    phase_rad : ndarray, optional
+        Additional phase in radians, broadcastable to (nx, ny, nz, n_spectral).
+        Applied as exp(+i*phase_rad) before spatial encoding. Generate at
+        arange(n_spectral)*dwell_time; do not include static B0 a second time.
 
     Returns
     -------
@@ -253,6 +273,8 @@ def simulate_mrsi(
         basis_fid = fid[np.newaxis, np.newaxis, np.newaxis, :n_spectral]
         signal += conc * basis_fid * decay * phase_mod
 
+    signal = signal * _additional_phase(phase_rad, signal.shape, np)
+
     # FFT over spatial dimensions → k-space
     kspace = np.fft.fftn(signal, axes=(0, 1, 2))
     return kspace
@@ -263,12 +285,42 @@ def simulate_mrsi_jax(
     basis: dict[str, np.ndarray],
     n_spectral: int = 1024,
     dwell_time: float = 2.5e-4,
+    *,
+    phase_rad=None,
 ):
-    """JAX-compatible MRSI simulation. Same as simulate_mrsi but returns JAX arrays."""
+    """Simulate MRSI with native JAX operations and multiple metabolites.
+
+    Parameters
+    ----------
+    model : TissueModel
+        Tissue maps, which may contain JAX arrays or tracers. TissueModel is
+        not a registered pytree: construct it inside a transformed function
+        or use simulate_mrsi_from_arrays for direct array arguments.
+    basis : dict[str, array]
+        Basis FIDs with at least n_spectral samples.
+    n_spectral : int
+        Number of spectral points (static during JIT).
+    dwell_time : float
+        Dwell time in seconds.
+    phase_rad : array, optional
+        Additional phase, as in simulate_mrsi.
+
+    Returns
+    -------
+    jax.Array
+        Complex k-space, shape (nx, ny, nz, n_spectral).
+    """
     import jax.numpy as jnp
 
-    kspace_np = simulate_mrsi(model, basis, n_spectral, dwell_time)
-    return jnp.array(kspace_np)
+    result = jnp.zeros((*model.shape, n_spectral), dtype=jnp.complex64)
+    for name, fid in basis.items():
+        if name in model.metabolite_maps:
+            result = result + simulate_mrsi_from_arrays(
+                jnp.asarray(model.metabolite_maps[name]), jnp.asarray(fid),
+                jnp.asarray(model.t2star_map), jnp.asarray(model.b0_shift_map),
+                n_spectral, dwell_time, phase_rad=phase_rad,
+            )
+    return result
 
 
 def simulate_mrsi_from_arrays(
@@ -278,6 +330,8 @@ def simulate_mrsi_from_arrays(
     b0_shift_map: 'jnp.ndarray',
     n_spectral: int = 1024,
     dwell_time: float = 2.5e-4,
+    *,
+    phase_rad=None,
 ) -> 'jnp.ndarray':
     """Fully differentiable MRSI simulation from JAX arrays.
 
@@ -298,6 +352,9 @@ def simulate_mrsi_from_arrays(
         Number of spectral points.
     dwell_time : float
         Dwell time in seconds.
+    phase_rad : array, optional
+        Additional phase in radians, broadcastable to the voxel/time signal.
+        exp(+i*phase_rad) is applied before spatial encoding.
 
     Returns
     -------
@@ -317,6 +374,7 @@ def simulate_mrsi_from_arrays(
     basis_broadcast = basis_fid[jnp.newaxis, jnp.newaxis, jnp.newaxis, :n_spectral]
 
     signal = conc * basis_broadcast * decay * phase_mod
+    signal = signal * _additional_phase(phase_rad, signal.shape, jnp)
 
     kspace = jnp.fft.fftn(signal, axes=(0, 1, 2))
     return kspace
@@ -345,15 +403,43 @@ class EPSITrajectory:
     n_spectral : int
         Number of spectral points (= number of gradient lobes).
     dwell_time : float
-        Spectral dwell time in seconds (time between lobes).
+        Time between lobe starts in seconds. Corresponding k locations on
+        opposite-polarity lobes generally have different intra-lobe offsets.
     fov_mm : float
         Field of view in mm.
+    sample_times_s : ndarray, optional
+        Actual ADC times relative to excitation, in acquisition order.
+        If omitted, every sample in a lobe shares its start time (an ideal
+        instantaneous readout reference, not a hardware-realizable sequence).
     """
     k_readout: np.ndarray
     n_spatial: int
     n_spectral: int
     dwell_time: float
     fov_mm: float
+    sample_times_s: Optional[np.ndarray] = None
+
+    def __post_init__(self):
+        if (not isinstance(self.n_spatial, (int, np.integer)) or self.n_spatial < 1
+                or not isinstance(self.n_spectral, (int, np.integer)) or self.n_spectral < 1):
+            raise ValueError("EPSI dimensions must be positive integers")
+        if not np.isfinite(self.dwell_time) or self.dwell_time <= 0:
+            raise ValueError("dwell_time must be positive and finite")
+        if not np.isfinite(self.fov_mm) or self.fov_mm <= 0:
+            raise ValueError("fov_mm must be positive and finite")
+        self.k_readout = np.array(self.k_readout, dtype=float, copy=True)
+        count = self.n_spatial * self.n_spectral
+        if self.k_readout.shape != (count,) or not np.all(np.isfinite(self.k_readout)):
+            raise ValueError("k_readout must contain one finite coordinate per ADC sample")
+        if self.sample_times_s is None:
+            self.sample_times_s = np.repeat(np.arange(self.n_spectral) * self.dwell_time,
+                                            self.n_spatial)
+        else:
+            self.sample_times_s = np.array(self.sample_times_s, dtype=float, copy=True)
+        times = self.sample_times_s
+        if (times.shape != (count,) or not np.all(np.isfinite(times))
+                or np.any(times < 0) or np.any(np.diff(times) < 0)):
+            raise ValueError("sample_times_s must be finite, nonnegative and ordered per ADC sample")
 
 
 def generate_epsi_trajectory(
@@ -361,12 +447,17 @@ def generate_epsi_trajectory(
     n_spectral: int = 256,
     dwell_time: float = 2.5e-4,
     fov_mm: float = 240.0,
+    *,
+    adc_dwell_time: Optional[float] = None,
+    readout_start_s: float = 0.0,
 ) -> EPSITrajectory:
     """Generate an EPSI oscillating readout trajectory.
 
     The trajectory consists of n_spectral bipolar gradient lobes,
-    each traversing n_spatial points in k-space. Odd lobes go left→right,
-    even lobes go right→left.
+    each traversing n_spatial distinct centered DFT bins. Zero-indexed even
+    lobes go left→right and odd lobes go right→left. No gradient ramps or
+    hardware limits are modeled. Measured k/time arrays can instead be
+    supplied via EPSITrajectory.
 
     Parameters
     ----------
@@ -375,20 +466,34 @@ def generate_epsi_trajectory(
     n_spectral : int
         Number of spectral points (gradient lobes).
     dwell_time : float
-        Time between corresponding k-space positions across lobes (seconds).
+        Time between lobe starts (seconds).
     fov_mm : float
         Field of view in mm.
+    adc_dwell_time : float, optional
+        Time between ADC samples within a lobe (seconds). The complete ADC
+        train per lobe must fit within dwell_time. None preserves the ideal
+        instantaneous-lobe reference; real sample timing requires this value.
+    readout_start_s : float
+        First ADC time relative to excitation, in seconds.
 
     Returns
     -------
     EPSITrajectory
     """
-    # k-space extent: -k_max to +k_max
-    k_max = n_spatial / (2.0 * fov_mm)  # 1/mm
-
-    # One lobe: linear ramp from -k_max to +k_max (or reversed)
-    k_lobe_forward = np.linspace(-k_max, k_max, n_spatial)
-    k_lobe_reverse = np.linspace(k_max, -k_max, n_spatial)
+    if (not isinstance(n_spatial, (int, np.integer)) or n_spatial < 1
+            or not isinstance(n_spectral, (int, np.integer)) or n_spectral < 1):
+        raise ValueError("EPSI dimensions must be positive integers")
+    if not np.isfinite(fov_mm) or fov_mm <= 0:
+        raise ValueError("fov_mm must be positive and finite")
+    if not np.isfinite(readout_start_s) or readout_start_s < 0:
+        raise ValueError("readout_start_s must be finite and nonnegative")
+    if adc_dwell_time is not None and (
+            not np.isfinite(adc_dwell_time) or adc_dwell_time <= 0
+            or adc_dwell_time * n_spatial > dwell_time):
+        raise ValueError("ADC samples must fit in the positive lobe interval")
+    # Distinct DFT bins: do not duplicate the periodic Nyquist endpoint.
+    k_lobe_forward = np.fft.fftshift(np.fft.fftfreq(n_spatial, d=fov_mm / n_spatial))
+    k_lobe_reverse = k_lobe_forward[::-1]
 
     # Stack lobes: alternating forward/reverse
     k_all = []
@@ -399,6 +504,8 @@ def generate_epsi_trajectory(
             k_all.append(k_lobe_reverse)
 
     k_readout = np.concatenate(k_all)
+    offsets = np.arange(n_spatial) * (adc_dwell_time or 0.0)
+    times = readout_start_s + np.arange(n_spectral)[:, None] * dwell_time + offsets
 
     return EPSITrajectory(
         k_readout=k_readout,
@@ -406,6 +513,7 @@ def generate_epsi_trajectory(
         n_spectral=n_spectral,
         dwell_time=dwell_time,
         fov_mm=fov_mm,
+        sample_times_s=times.ravel(),
     )
 
 
@@ -413,6 +521,9 @@ def simulate_epsi(
     model: TissueModel,
     basis: dict,
     traj: EPSITrajectory,
+    *,
+    basis_dwell_time: Optional[float] = None,
+    phase_rad: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Simulate EPSI signal from a tissue model along the readout direction.
 
@@ -422,10 +533,19 @@ def simulate_epsi(
     Parameters
     ----------
     model : TissueModel
-        Tissue model (uses first spatial dimension as readout).
+        Tissue model (uses first spatial dimension as readout). Concentrations,
+        T2* and B0 are averaged over y/z: this is a 1D surrogate, not a full
+        projection through a heterogeneous 3D object.
     basis : dict[str, ndarray]
         Metabolite basis spectra.
     traj : EPSITrajectory
+        K-space coordinates and actual ADC timestamps.
+    basis_dwell_time : float, optional
+        Basis FID sampling interval in seconds; defaults to traj.dwell_time.
+        Complex linear interpolation is used; samples outside basis support
+        are zero. Supply a sufficiently dense basis spanning the full train.
+    phase_rad : ndarray, optional
+        Additional phase in radians, broadcastable to (nx, n_ADC).
 
     Returns
     -------
@@ -437,12 +557,14 @@ def simulate_epsi(
 
     # Spatial positions along readout (x direction), in mm
     voxel_size_x = traj.fov_mm / nx if nx > 0 else 1.0
-    x_positions = (np.arange(nx) - nx / 2) * voxel_size_x  # mm, centered
+    x_positions = (np.arange(nx) - nx // 2) * voxel_size_x  # mm, centered
 
-    # Time array: each sample has a time = lobe_index * dwell_time + intra-lobe offset
-    # For simplicity, spectral time = lobe index * dwell_time
-    lobe_indices = np.repeat(np.arange(traj.n_spectral), traj.n_spatial)
-    t_spectral = lobe_indices * traj.dwell_time
+    t_spectral = traj.sample_times_s
+    basis_dt = traj.dwell_time if basis_dwell_time is None else basis_dwell_time
+    if not np.isfinite(basis_dt) or basis_dt <= 0:
+        raise ValueError("basis_dwell_time must be positive and finite")
+    extra_phase = np.broadcast_to(_additional_phase(phase_rad, (nx, n_total), np),
+                                  (nx, n_total))
 
     # Build voxel signals: for each x position, compute FID at each spectral time
     # Average over y, z dimensions (projection onto readout)
@@ -462,9 +584,9 @@ def simulate_epsi(
 
             # Interpolate basis FID at spectral times
             n_basis = len(basis_fid)
-            basis_times = np.arange(n_basis) * traj.dwell_time
-            basis_real = np.interp(t_spectral, basis_times, np.real(basis_fid), right=0)
-            basis_imag = np.interp(t_spectral, basis_times, np.imag(basis_fid), right=0)
+            basis_times = np.arange(n_basis) * basis_dt
+            basis_real = np.interp(t_spectral, basis_times, np.real(basis_fid), left=0, right=0)
+            basis_imag = np.interp(t_spectral, basis_times, np.imag(basis_fid), left=0, right=0)
             basis_interp = basis_real + 1j * basis_imag
 
             voxel_fid += conc * basis_interp
@@ -481,7 +603,7 @@ def simulate_epsi(
         # Spatial encoding: exp(-i * 2π * k * x)
         spatial_phase = np.exp(-2j * np.pi * traj.k_readout * x_positions[ix])
 
-        signal += voxel_fid * decay * phase_mod * spatial_phase
+        signal += voxel_fid * decay * phase_mod * spatial_phase * extra_phase[ix]
 
     return signal
 
@@ -492,8 +614,11 @@ def reconstruct_epsi(
 ) -> np.ndarray:
     """Reconstruct EPSI signal to spatial-spectral image.
 
-    Separates the interleaved spatial-spectral data, reverses even lobes,
-    and applies FFT along the spatial dimension.
+    Reorders the bipolar centered DFT grid and applies a centered inverse FFT
+    without modifying the raw input. This is exact for instantaneous lobes;
+    intra-lobe spectral/field evolution causes time-shear artifacts which
+    this baseline reconstruction does not correct. Arbitrary k trajectories
+    require a different reconstruction and are rejected here.
 
     Parameters
     ----------
@@ -510,7 +635,14 @@ def reconstruct_epsi(
     nf = traj.n_spectral
 
     # Reshape to (n_spectral, n_spatial) — one row per lobe
-    data = signal.reshape(nf, ns)
+    if np.shape(signal) != (nf * ns,):
+        raise ValueError("signal must contain one value per ADC sample")
+    data = np.array(signal, copy=True).reshape(nf, ns)
+    k = traj.k_readout.reshape(nf, ns).copy()
+    k[1::2] = k[1::2, ::-1]
+    expected_k = np.fft.fftshift(np.fft.fftfreq(ns, d=traj.fov_mm / ns))
+    if not np.allclose(k, expected_k[None, :], rtol=1e-7, atol=1e-12):
+        raise ValueError("reconstruct_epsi requires the alternating centered DFT grid")
 
     # Reverse even-numbered lobes (bipolar correction)
     data[1::2, :] = data[1::2, ::-1]
@@ -521,7 +653,7 @@ def reconstruct_epsi(
 
     # FFT along spatial dimension → image space
     # (Already in k-space along spatial dim from the readout encoding)
-    image = np.fft.ifft(data, axis=0)
+    image = np.fft.fftshift(np.fft.ifft(np.fft.ifftshift(data, axes=0), axis=0), axes=0)
 
     return image
 
@@ -532,6 +664,9 @@ def simulate_epsi_from_arrays(
     t2star,
     b0,
     traj: EPSITrajectory,
+    *,
+    basis_dwell_time: Optional[float] = None,
+    phase_rad=None,
 ):
     """Differentiable EPSI simulation from JAX arrays (1D readout).
 
@@ -546,6 +681,12 @@ def simulate_epsi_from_arrays(
     b0 : jnp.ndarray, shape (nx,)
         B0 shift per voxel (Hz).
     traj : EPSITrajectory
+        K-space coordinates and ADC timestamps, prepared outside JIT.
+    basis_dwell_time : float, optional
+        Basis sampling interval in seconds; defaults to traj.dwell_time.
+        Linear interpolation and zero padding match simulate_epsi.
+    phase_rad : array, optional
+        Additional phase in radians, broadcastable to (nx, n_ADC).
 
     Returns
     -------
@@ -559,18 +700,21 @@ def simulate_epsi_from_arrays(
     n_total = ns * nf
 
     voxel_size_x = traj.fov_mm / nx
-    x_pos = (jnp.arange(nx) - nx / 2) * voxel_size_x
+    x_pos = (jnp.arange(nx) - nx // 2) * voxel_size_x
 
-    lobe_indices = jnp.repeat(jnp.arange(nf), ns)
-    t_spectral = lobe_indices * traj.dwell_time
+    t_spectral = jnp.asarray(traj.sample_times_s)
     k = jnp.array(traj.k_readout)
 
     # Interpolate basis at spectral times
     n_basis = basis_fid.shape[0]
-    basis_times = jnp.arange(n_basis) * traj.dwell_time
-    # Simple: use the lobe index to sample the basis
-    lobe_idx_clipped = jnp.clip(lobe_indices, 0, n_basis - 1)
-    basis_samples = basis_fid[lobe_idx_clipped]
+    basis_dt = traj.dwell_time if basis_dwell_time is None else basis_dwell_time
+    if not np.isfinite(basis_dt) or basis_dt <= 0:
+        raise ValueError("basis_dwell_time must be positive and finite; static during JIT")
+    # Match the host-prepared ADC clock before casting to JAX precision. A
+    # different rounding of the final knot could incorrectly zero the last FID.
+    basis_times = jnp.asarray(np.arange(n_basis) * basis_dt)
+    basis_samples = (jnp.interp(t_spectral, basis_times, jnp.real(basis_fid), left=0, right=0)
+                     + 1j * jnp.interp(t_spectral, basis_times, jnp.imag(basis_fid), left=0, right=0))
 
     # Vectorized over voxels
     # (nx, 1) * (1, n_total) broadcasting
@@ -579,11 +723,12 @@ def simulate_epsi_from_arrays(
     b0v = b0[:, None]
     xp = x_pos[:, None]
 
-    decay = jnp.exp(-t_spectral[None, :] / (t2s + 1e-10))
+    decay = jnp.exp(-t_spectral[None, :] / jnp.maximum(t2s, 1e-6))
     phase_b0 = jnp.exp(2j * jnp.pi * b0v * t_spectral[None, :])
     spatial = jnp.exp(-2j * jnp.pi * k[None, :] * xp)
 
     voxel_signals = conc * basis_samples[None, :] * decay * phase_b0 * spatial
+    voxel_signals = voxel_signals * _additional_phase(phase_rad, (nx, n_total), jnp)
     signal = jnp.sum(voxel_signals, axis=0)
 
     return signal

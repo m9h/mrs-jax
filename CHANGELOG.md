@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- Exact piecewise-current phase histories with explicit SI units, signal sign,
+  ideal RF sensitivity and current-delay parameters; NumPy/JAX backends.
+- Additional voxel/time phase inputs to MRSI and EPSI forward models.
+- Explicit EPSI ADC timestamps and independent basis sampling intervals.
+- Analytical phase/gradient tests and full complex DFT reconstruction references.
+
+### Fixed
+
+- EPSI now uses distinct centered DFT bins and matching inverse transforms.
+  Spatial outputs change from the previous incorrect grid/centering.
+- EPSI reconstruction no longer mutates raw input.
+- NumPy/JAX EPSI basis interpolation consistently zero-fills beyond support.
+- `simulate_mrsi_jax` now computes natively in JAX, including multiple metabolites,
+  instead of wrapping a NumPy result.
+
 ## [0.1.0] - 2025
 
 ### Added

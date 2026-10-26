@@ -2,7 +2,7 @@
 
 **MR Spectroscopy processing in JAX** -- from single-voxel GABA editing to whole-brain metabolic mapping.
 
-mrs-jax is a complete, GPU-accelerated pipeline for processing edited Magnetic Resonance Spectroscopy data. It covers the full journey from raw scanner data to absolute metabolite concentrations, with JAX providing automatic differentiation, batch parallelism, and JIT compilation.
+mrs-jax provides edited spectroscopy processing and MRSI/EPSI simulation prototypes. Selected kernels support JAX differentiation, batching and JIT compilation; high-level quantification also uses NumPy/SciPy.
 
 ## Features
 
@@ -56,6 +56,7 @@ print(f"GABA/NAA: {result['gaba_naa_ratio']:.3f}")
 tutorials/mega_press_gaba
 tutorials/hermes_editing
 tutorials/jax_gpu_acceleration
+current-encoding
 ```
 
 ```{toctree}
